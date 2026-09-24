@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Professional GIS Flood Risk & Urban Vulnerability Dashboard</title>
+    <style>
+        :root {
+            --bg-dark: #050508;
+            --panel-bg: rgba(6, 6, 12, 0.96);
+            --border-color: rgba(255, 255, 255, 0.14);
+            --accent-cyan: #38bdf8;
+            --accent-green: #4ade80;
+            --accent-yellow: #facc15;
+            --accent-red: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body { margin: 0; overflow: hidden; background-color: var(--bg-dark); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: var(--text-main); }
+        
+        /* Top-Right Corner: Header & Status */
+        #dashboard-header {
+            position: absolute; top: 15px; right: 20px; width: 340px;
+            background: var(--panel-bg); padding: 10px 15px; border-radius: 10px;
+            border: 1px solid var(--border-color); z-index: 10;
+            box-shadow: 0 12px 35px rgba(0,0,0,0.85); backdrop-filter: blur(10px);
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        
+        .header-title h2 { margin: 0; font-size: 14px; color: var(--accent-cyan); letter-spacing: 0.5px; }
+        .header-title span { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+        .system-badges { display: flex; gap: 8px; }
+        .badge { background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); padding: 3px 8px; border-radius: 6px; font-size: 10.5px; color: var(--accent-cyan); font-weight: 600; }
+        .badge.warning { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.35); color: var(--accent-red); }
+        .badge.moderate { background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.35); color: var(--accent-yellow); }
+
+        /* Top-Left Corner: Hydrodynamic & Terrain Analysis */
+        #top-left-panel {
+            position: absolute; top: 15px; left: 20px; width: 320px;
+            background: var(--panel-bg); padding: 12px; border-radius: 10px;
+            border: 1px solid var(--border-color); z-index: 10;
+            box-shadow: 0 12px 35px rgba(0,0,0,0.85); backdrop-filter: blur(10px);
+        }
+
+        /* Bottom-Left Corner: Infrastructure Vulnerability Index */
+        #bottom-left-panel {
+            position: absolute; bottom: 45px; left: 20px; width: 320px;
+            background: var(--panel-bg); padding: 12px; border-radius: 10px;
+            border: 1px solid var(--border-color); z-index: 10;
+            box-shadow: 0 12px 35px rgba(0,0,0,0.85); backdrop-filter: blur(10px);
+        }
+
+        /* Bottom-Right Corner: Hydraulic Surge Progression (Timeline Graph) */
+        #bottom-right-panel {
+            position: absolute; bottom: 45px; right: 20px; width: 340px;
+            background: var(--panel-bg); padding: 12px; border-radius: 10px;
+            border: 1px solid var(--border-color); z-index: 10;
+            box-shadow: 0 12px 35px rgba(0,0,0,0.85); backdrop-filter: blur(10px);
+        }
+
+        .section-box { margin-bottom: 0; }
+
+        h4 { margin: 0 0 4px 0; font-size: 12px; color: var(--accent-green); text-transform: uppercase; letter-spacing: 0.5px; }
+        p.desc { margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.35; }
+
+        .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+        .metric-card { background: rgba(2, 2, 6, 0.7); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; text-align: center; }
+        .metric-card .val { font-size: 13px; font-weight: bold; color: var(--accent-cyan); }
+        .metric-card .lbl { font-size: 9.5px; color: var(--text-muted); margin-top: 2px; }
+
+        #graph-box {
+            background: rgba(2, 2, 6, 0.85); padding: 4px; border-radius: 6px;
+            border: 1px solid rgba(74, 222, 128, 0.25); text-align: center; margin-top: 6px;
+        }
+        canvas { display: block; margin: 0 auto; }
+
+        #status-box { margin-top: 6px; font-size: 11px; color: var(--accent-yellow); font-weight: bold; padding: 5px; background: rgba(250, 204, 21, 0.1); border-radius: 4px; border-left: 3px solid var(--accent-yellow); }
+        #timer-display { margin-top: 4px; font-size: 10.5px; color: var(--text-muted); display: flex; justify-content: space-between; }
+        
+        #interaction-hint {
+            position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+            background: var(--panel-bg); padding: 5px 12px; border-radius: 6px;
+            border: 1px solid var(--border-color); font-size: 10.5px; color: var(--text-muted); z-index: 10;
+            backdrop-filter: blur(8px); box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top-Right Corner: Header & Status -->
+    <div id="dashboard-header">
+        <div class="header-title">
+            <span>Spatial Decision Support System</span>
+            <h2>Urban Flood Risk Analytics</h2>
+        </div>
+        <div class="system-badges">
+            <div class="badge">GIS Model: Active</div>
+            <div id="status-badge" class="badge moderate">Hazard: Normal</div>
+        </div>
+    </div>
+
+    <!-- Top-Left Corner: Hydrodynamic & Terrain Analysis -->
+    <div id="top-left-panel">
+        <div class="section-box">
+            <h4>1. Hydrodynamic & Terrain Analysis</h4>
+            <p class="desc">Simulates catchment basin overflow along valley topography, tracking inundation expansion and flow velocity across urban frameworks.</p>
+        </div>
+    </div>
+
+    <!-- Bottom-Left Corner: Infrastructure Vulnerability Index -->
+    <div id="bottom-left-panel">
+        <div class="section-box">
+            <h4>2. Infrastructure Vulnerability Index</h4>
+            <p class="desc" style="margin-bottom: 6px;">Assesses structural exposure levels of commercial units and residential blocks against critical water thresholds.</p>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="val" id="m-buildings">158</div>
+                    <div class="lbl">At-Risk Buildings</div>
+                </div>
+                <div class="metric-card">
+                    <div class="val" id="m-bridges">4 / 4</div>
+                    <div class="lbl">Bridges Monitored</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom-Right Corner: Hydraulic Surge Progression -->
+    <div id="bottom-right-panel">
+        <div class="section-box">
+            <h4>3. Hydraulic Surge Progression</h4>
+            <div id="graph-box">
+                <canvas id="timelineGraph" width="310" height="65"></canvas>
+            </div>
+            <div id="status-box">Status: Normal River Flow Dynamics</div>
+            <div id="timer-display">
+               <span id="time-text">Cycle Time: 0.0s / 30.0s</span>
+               <span style="color: var(--accent-cyan);">Phase: Baseline</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="interaction-hint">
+        🔍 Controls: Use Mouse Scroll Wheel to Zoom In & Zoom Out (Fixed 360° Perspective)
+    </div>
+
+    <!-- Three.js CDN & OrbitControls CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        let scene, camera, renderer, controls, terrainMesh, waterMesh, waterMat, rainParticles, sparklePoints;
+        let waveClock = 0;
+        let cycleTimer = 0;
+        const totalCycleTime = 30.0;
+        let graphDataPoints = [];
+        let structuresGroup = new THREE.Group();
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020206);
+            scene.fog = new THREE.FogExp2(0x020206, 0.022);
+
+            camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, -28, 20);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Configure OrbitControls: Rotation & Panning disabled, Zooming enabled
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableRotate = false;
+            controls.enablePan = false;
+            controls.enableZoom = true;
+            controls.minDistance = 8;
+            controls.maxDistance = 50;
+
+            const ambientLight = new THREE.AmbientLight(0x334155, 0.9);
+            scene.add(ambientLight);
+
+            const sunLight = new THREE.DirectionalLight(0x38bdf8, 0.85);
+            sunLight.position.set(15, -20, 25);
+            sunLight.castShadow = true;
+            scene.add(sunLight);
+
+            const fillLight = new THREE.DirectionalLight(0x4ade80, 0.4);
+            fillLight.position.set(-15, 15, 20);
+            scene.add(fillLight);
+
+            const rimLight = new THREE.DirectionalLight(0xf43f5e, 0.6);
+            rimLight.position.set(-15, -15, 15);
+            scene.add(rimLight);
+
+            createTerrainWithValley();
+            createRealisticWaterSurface();
+            createWaterSparkles();
+            createRainSystem();
+            
+            scene.add(structuresGroup);
+            createLandscapeAndInfrastructure();
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function getTerrainZ(x, y) {
+            let z = Math.sin(x * 0.2) * Math.cos(y * 0.2) * 1.2
+                  + Math.sin(x * 0.5) * Math.cos(y * 0.5) * 0.4;
+
+            let valleyChannel = Math.sin(y * 0.2) * 2.5;
+            let distFromValley = Math.abs(x - valleyChannel);
+            
+            if (distFromValley < 3.5) {
+                z = -1.2 + (distFromValley * 0.35);
+            } else {
+                z += Math.abs(x) * 0.12;
+            }
+            return z;
+        }
+
+        function createTerrainWithValley() {
+            const geom = new THREE.PlaneGeometry(30, 30, 90, 90);
+            const pos = geom.attributes.position;
+            const colors = [];
+
+            for (let i = 0; i < pos.count; i++) {
+                let x = pos.getX(i);
+                let y = pos.getY(i);
+                let z = getTerrainZ(x, y);
+
+                pos.setZ(i, z);
+
+                if (z > 0.9) {
+                    colors.push(0.45, 0.38, 0.32);   // High elevation ridges (distinct earthy tone)
+                } else if (z > 0.3) {
+                    colors.push(0.3, 0.25, 0.2);     // Slopes
+                } else if (z > -0.2) {
+                    colors.push(0.12, 0.3, 0.18);    // Midlands / Green base
+                } else {
+                    colors.push(0.08, 0.2, 0.12);    // Valley floor
+                }
+            }
+            
+            geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geom.computeVertexNormals();
+
+            const mat = new THREE.MeshStandardMaterial({ 
+                vertexColors: true, 
+                roughness: 0.85,
+                metalness: 0.05
+            });
+            
+            terrainMesh = new THREE.Mesh(geom, mat);
+            scene.add(terrainMesh);
+        }
+
+        function createRealisticWaterSurface() {
+            const waterGeom = new THREE.PlaneGeometry(28.0, 28, 80, 80);
+            waterMat = new THREE.MeshStandardMaterial({
+                color: 0x0284c7,
+                transparent: true,
+                opacity: 0.88,
+                roughness: 0.08,
+                metalness: 0.6,
+                emissive: 0x0284c7,
+                emissiveIntensity: 0.35,
+                side: THREE.DoubleSide
+            });
+
+            waterMesh = new THREE.Mesh(waterGeom, waterMat);
+            waterMesh.position.set(0, 0, -0.72);
+            scene.add(waterMesh);
+        }
+
+        function createWaterSparkles() {
+            const sparkleGeom = new THREE.BufferGeometry();
+            const count = 350;
+            const pos = new Float32Array(count * 3);
+
+            for (let i = 0; i < count * 3; i += 3) {
+                pos[i] = (Math.random() - 0.5) * 24;
+                pos[i+1] = (Math.random() - 0.5) * 24;
+                pos[i+2] = -0.65 + Math.random() * 0.1;
+            }
+
+            sparkleGeom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const sparkleMat = new THREE.PointsMaterial({
+                color: 0xbae6fd,
+                size: 0.18,
+                transparent: true,
+                opacity: 0.9,
+                blending: THREE.AdditiveBlending
+            });
+
+            sparklePoints = new THREE.Points(sparkleGeom, sparkleMat);
+            scene.add(sparklePoints);
+        }
+
+        function createRainSystem() {
+            const geom = new THREE.BufferGeometry();
+            const count = 1800;
+            const pos = new Float32Array(count * 3);
+
+            for (let i = 0; i < count * 3; i += 3) {
+                pos[i] = (Math.random() - 0.5) * 30;
+                pos[i+1] = (Math.random() - 0.5) * 30;
+                pos[i+2] = Math.random() * 15 + 2;
+            }
+
+            geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const rainMat = new THREE.PointsMaterial({
+                color: 0x38bdf8,
+                size: 0.12,
+                transparent: true,
+                opacity: 0.85
+            });
+
+            rainParticles = new THREE.Points(geom, rainMat);
+            rainParticles.visible = false;
+            scene.add(rainParticles);
+        }
+
+        function spawnBuilding(x, y, z, type = 1) {
+            const group = new THREE.Group();
+            const windowMat = new THREE.MeshStandardMaterial({ 
+                color: 0x7dd3fc, 
+                roughness: 0.1, 
+                metalness: 0.9, 
+                emissive: 0x38bdf8, 
+                emissiveIntensity: 0.9 
+            });
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x1e1b4b, roughness: 0.8 });
+
+            if (type === 1) {
+                const wallMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.8, 0.8, 0.8),
+                    new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 })
+                );
+                wallMesh.position.z = 0.4;
+                group.add(wallMesh);
+
+                const roofMesh = new THREE.Mesh(
+                    new THREE.ConeGeometry(0.65, 0.4, 4),
+                    new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.4 })
+                );
+                roofMesh.rotation.z = Math.PI / 4;
+                roofMesh.position.z = 1.0;
+                group.add(roofMesh);
+
+                const door = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 0.32), doorMat);
+                door.position.set(0, -0.41, 0.16);
+                group.add(door);
+
+                const win1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.2, 0.2), windowMat);
+                win1.position.set(-0.41, 0, 0.45);
+                group.add(win1);
+
+                const win2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.2, 0.2), windowMat);
+                win2.position.set(0.41, 0, 0.45);
+                group.add(win2);
+
+            } else if (type === 2) {
+                const baseMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.9, 1.0, 1.0),
+                    new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.6 })
+                );
+                baseMesh.position.z = 0.5;
+                group.add(baseMesh);
+
+                const roofMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.0, 1.1, 0.3),
+                    new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.4 })
+                );
+                roofMesh.position.z = 1.15;
+                group.add(roofMesh);
+
+                const shopDoor = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.45), windowMat);
+                shopDoor.position.set(0, -0.51, 0.25);
+                group.add(shopDoor);
+
+                const winA = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.25), windowMat);
+                winA.position.set(-0.22, -0.51, 0.75);
+                group.add(winA);
+
+                const winB = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.25), windowMat);
+                winB.position.set(0.22, -0.51, 0.75);
+                group.add(winB);
+
+            } else {
+                const towerMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.7, 0.7, 2.0),
+                    new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.2, metalness: 0.6 })
+                );
+                towerMesh.position.z = 1.0;
+                group.add(towerMesh);
+
+                const topMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.5, 0.5, 0.35),
+                    new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.2, metalness: 0.8, emissive: 0xf43f5e, emissiveIntensity: 0.9 })
+                );
+                topMesh.position.z = 2.15;
+                group.add(topMesh);
+
+                for (let wz = 0.5; wz <= 1.6; wz += 0.4) {
+                    const frontWin = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.04, 0.22), windowMat);
+                    frontWin.position.set(0, -0.37, wz);
+                    group.add(frontWin);
+
+                    const backWin = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.04, 0.22), windowMat);
+                    backWin.position.set(0, 0.37, wz);
+                    group.add(backWin);
+                }
+
+                const towerDoor = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.35), doorMat);
+                towerDoor.position.set(0, -0.37, 0.2);
+                group.add(towerDoor);
+            }
+
+            group.position.set(x, y, z);
+            structuresGroup.add(group);
+        }
+
+        function spawnRichVegetation(x, y, z) {
+            const group = new THREE.Group();
+            let randStyle = Math.random();
+
+            if (randStyle < 0.4) {
+                const trunk = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.06, 0.09, 1.0),
+                    new THREE.MeshStandardMaterial({ color: 0x3f2e1e, roughness: 0.9 })
+                );
+                trunk.position.z = 0.5;
+                group.add(trunk);
+
+                const leaves1 = new THREE.Mesh(
+                    new THREE.ConeGeometry(0.5, 0.8, 7),
+                    new THREE.MeshStandardMaterial({ color: 0x047857, roughness: 0.6 })
+                );
+                leaves1.position.z = 0.95;
+                group.add(leaves1);
+
+                const leaves2 = new THREE.Mesh(
+                    new THREE.ConeGeometry(0.35, 0.65, 7),
+                    new THREE.MeshStandardMaterial({ color: 0x34d399, roughness: 0.5, emissive: 0x059669, emissiveIntensity: 0.3 })
+                );
+                leaves2.position.z = 1.35;
+                group.add(leaves2);
+
+            } else if (randStyle < 0.75) {
+                const trunk = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.07, 0.09, 0.8),
+                    new THREE.MeshStandardMaterial({ color: 0x3f2e1e, roughness: 0.9 })
+                );
+                trunk.position.z = 0.4;
+                group.add(trunk);
+
+                const canopy = new THREE.Mesh(
+                    new THREE.DodecahedronGeometry(0.42),
+                    new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.7 })
+                );
+                canopy.position.z = 0.95;
+                group.add(canopy);
+
+            } else {
+                for (let b = 0; b < 3; b++) {
+                    let offsetX = (Math.random() - 0.5) * 0.28;
+                    let offsetY = (Math.random() - 0.5) * 0.28;
+                    const bush = new THREE.Mesh(
+                        new THREE.SphereGeometry(0.2 + Math.random() * 0.08, 6, 6),
+                        new THREE.MeshStandardMaterial({ color: 0x6ee7b7, roughness: 0.8 })
+                    );
+                    bush.position.set(offsetX, offsetY, 0.18);
+                    group.add(bush);
+                }
+            }
+
+            group.position.set(x, y, z);
+            structuresGroup.add(group);
+        }
+
+        function spawnPowerPylon(x, y, z) {
+            const pylonGroup = new THREE.Group();
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.1 });
+
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.07, 1.8), poleMat);
+            pole.position.z = 0.9;
+            pylonGroup.add(pole);
+
+            const crossarm = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.06, 0.06), poleMat);
+            crossarm.position.z = 1.6;
+            pylonGroup.add(crossarm);
+
+            pylonGroup.position.set(x, y, z);
+            structuresGroup.add(pylonGroup);
+        }
+
+        function createExtendedMainBridgeWithBuildings() {
+            const bridgeGroup = new THREE.Group();
+            const bridgeLength = 14.5; 
+
+            const deckMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
+            const deck = new THREE.Mesh(new THREE.BoxGeometry(1.6, bridgeLength, 0.16), deckMat);
+            bridgeGroup.add(deck);
+
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+            const line1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, bridgeLength * 0.96, 0.18), lineMat);
+            line1.position.x = -0.25;
+            bridgeGroup.add(line1);
+
+            const line2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, bridgeLength * 0.96, 0.18), lineMat);
+            line2.position.x = 0.25;
+            bridgeGroup.add(line2);
+
+            const bldMat1 = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.4, metalness: 0.3 });
+            const bld1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.8), bldMat1);
+            bld1.position.set(-0.5, -3.5, 0.45);
+            bridgeGroup.add(bld1);
+
+            const bldMat2 = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 });
+            const bld2 = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.5, 1.0), bldMat2);
+            bld2.position.set(0.5, 0.0, 0.55);
+            bridgeGroup.add(bld2);
+
+            const bldMat3 = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.6 });
+            const bld3 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.9, 0.7), bldMat3);
+            bld3.position.set(-0.5, 3.5, 0.4);
+            bridgeGroup.add(bld3);
+
+            const trussMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.8, roughness: 0.2, emissive: 0x0284c7, emissiveIntensity: 0.4 });
+            const archGeom = new THREE.CylinderGeometry(0.06, 0.06, bridgeLength, 6);
+            
+            const leftArch = new THREE.Mesh(archGeom, trussMat);
+            leftArch.rotation.x = Math.PI / 2;
+            leftArch.position.set(-0.8, 0, 0.3);
+            bridgeGroup.add(leftArch);
+
+            const rightArch = new THREE.Mesh(archGeom, trussMat);
+            rightArch.rotation.x = Math.PI / 2;
+            rightArch.position.set(0.8, 0, 0.3);
+            bridgeGroup.add(rightArch);
+
+            const pierMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.6 });
+            [-4.8, -2.4, 2.4, 4.8].forEach(py => {
+                const pierL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 2.3), pierMat);
+                pierL.position.set(-0.7, py, -0.5);
+                bridgeGroup.add(pierL);
+
+                const pierR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 2.3), pierMat);
+                pierR.position.set(0.7, py, -0.5);
+                bridgeGroup.add(pierR);
+            });
+
+            bridgeGroup.position.set(0, -2.2, 1.45); 
+            bridgeGroup.rotation.z = Math.PI / 2;
+            structuresGroup.add(bridgeGroup);
+        }
+
+        function createLandscapeAndInfrastructure() {
+            createExtendedMainBridgeWithBuildings();
+
+            const cols = 13;
+            const rows = 13;
+            const stepX = 2.1;
+            const stepY = 2.1;
+
+            for (let ix = 0; ix < cols; ix++) {
+                for (let iy = 0; iy < rows; iy++) {
+                    let x = (ix - cols / 2) * stepX + (Math.random() - 0.5) * 0.3;
+                    let y = (iy - rows / 2) * stepY + (Math.random() - 0.5) * 0.3;
+
+                    let valleyChannel = Math.sin(y * 0.2) * 2.5;
+                    if (Math.abs(x - valleyChannel) < 2.2 && Math.abs(y) < 5.5) continue;
+
+                    let z = getTerrainZ(x, y);
+
+                    if (z > 0.0) {
+                        let buildingType = (ix + iy) % 3 + 1;
+                        spawnBuilding(x, y, z, buildingType);
+
+                        let vegCount = 2 + Math.floor(Math.random() * 3);
+                        for (let v = 0; v < vegCount; v++) {
+                            let angle = Math.random() * Math.PI * 2;
+                            let dist = 0.7 + Math.random() * 0.9;
+                            let vegX = x + Math.cos(angle) * dist;
+                            let vegY = y + Math.sin(angle) * dist;
+                            let vegZ = getTerrainZ(vegX, vegY);
+                            
+                            if (vegZ > 0.0) {
+                                spawnRichVegetation(vegX, vegY, vegZ);
+                            }
+                        }
+
+                        if (iy === 2 && Math.abs(x) > 4.2 && z > 0.5) {
+                            spawnPowerPylon(x, y, z);
+                        }
+                    }
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            waveClock += 0.05;
+            let deltaTime = 0.016; 
+            cycleTimer += deltaTime;
+
+            if (cycleTimer > totalCycleTime) {
+                cycleTimer = 0;
+                graphDataPoints = [];
+            }
+
+            let linearProgress = cycleTimer / totalCycleTime;
+            let curveProgress = Math.pow(linearProgress, 2.2); 
+
+            let targetScaleX = THREE.MathUtils.lerp(1.0, 1.35, curveProgress);
+            let targetScaleY = THREE.MathUtils.lerp(1.0, 1.25, curveProgress);
+            let targetPosZ = THREE.MathUtils.lerp(-0.72, 1.5, curveProgress);
+
+            waterMesh.scale.x += (targetScaleX - waterMesh.scale.x) * 0.06;
+            waterMesh.scale.y += (targetScaleY - waterMesh.scale.y) * 0.06;
+            waterMesh.position.z += (targetPosZ - waterMesh.position.z) * 0.06;
+            sparklePoints.position.z = waterMesh.position.z + 0.07;
+
+            let hazardState = 'normal';
+            if (cycleTimer >= 20.0) {
+                hazardState = 'extreme';
+            } else if (cycleTimer >= 10.0) {
+                hazardState = 'moderate';
+            }
+
+            if (hazardState === 'extreme') {
+                waterMat.color.lerp(new THREE.Color(0xef4444), 0.1);
+                waterMat.emissive.lerp(new THREE.Color(0xdc2626), 0.1);
+                waterMat.emissiveIntensity = 0.5 + Math.sin(waveClock * 3.0) * 0.3;
+                waterMat.opacity = 0.92;
+
+                document.getElementById('status-badge').innerText = "Hazard: EXTREME";
+                document.getElementById('status-badge').className = "badge warning";
+                document.getElementById('status-box').innerHTML = "ALERT: Critical Flash Flood Warning!";
+                document.getElementById('status-box').style.color = "#ef4444";
+                document.getElementById('status-box').style.borderColor = "#ef4444";
+                document.getElementById('status-box').style.background = "rgba(239, 68, 68, 0.12)";
+                document.getElementById('m-buildings').innerText = "158 [CRITICAL]";
+            } else if (hazardState === 'moderate') {
+                waterMat.color.lerp(new THREE.Color(0xfacc15), 0.1);
+                waterMat.emissive.lerp(new THREE.Color(0xeab308), 0.1);
+                waterMat.emissiveIntensity = 0.35 + Math.sin(waveClock * 2.0) * 0.15;
+                waterMat.opacity = 0.88;
+
+                document.getElementById('status-badge').innerText = "Hazard: MODERATE";
+                document.getElementById('status-badge').className = "badge moderate";
+                document.getElementById('status-box').innerHTML = "Status: Heavy Precipitation & Rising Level";
+                document.getElementById('status-box').style.color = "#facc15";
+                document.getElementById('status-box').style.borderColor = "#facc15";
+                document.getElementById('status-box').style.background = "rgba(250, 204, 21, 0.12)";
+                document.getElementById('m-buildings').innerText = "64 [WARNING]";
+            } else {
+                waterMat.color.lerp(new THREE.Color(0x0284c7), 0.1);
+                waterMat.emissive.lerp(new THREE.Color(0x38bdf8), 0.1);
+                waterMat.emissiveIntensity = 0.35;
+                waterMat.opacity = 0.88;
+
+                document.getElementById('status-badge').innerText = "Hazard: NORMAL";
+                document.getElementById('status-badge').className = "badge";
+                document.getElementById('status-box').innerHTML = "Status: Normal River Flow Dynamics";
+                document.getElementById('status-box').style.color = "#4ade80";
+                document.getElementById('status-box').style.borderColor = "#4ade80";
+                document.getElementById('status-box').style.background = "rgba(74, 222, 128, 0.08)";
+                document.getElementById('m-buildings').innerText = "12 [SAFE]";
+            }
+
+            if (cycleTimer > 2.0) {
+                rainParticles.visible = true;
+            } else {
+                rainParticles.visible = false;
+            }
+
+            document.getElementById('time-text').innerText = "Cycle Time: " + cycleTimer.toFixed(1) + "s / 30.0s";
+
+            graphDataPoints.push({ val: curveProgress, state: hazardState });
+            if (graphDataPoints.length > 100) graphDataPoints.shift();
+
+            drawCurvedTimelineGraph();
+
+            if (waterMesh) {
+                const posAttr = waterMesh.geometry.attributes.position;
+                for (let i = 0; i < posAttr.count; i++) {
+                    let vx = posAttr.getX(i);
+                    let vy = posAttr.getY(i);
+                    let waveZ = Math.sin(vx * 2.0 + waveClock) * Math.cos(vy * 0.8 + waveClock) * 0.08;
+                    posAttr.setZ(i, waveZ);
+                }
+                waterMesh.geometry.attributes.position.needsUpdate = true;
+            }
+
+            if (sparklePoints) {
+                sparklePoints.rotation.z += 0.002;
+                const spPos = sparklePoints.geometry.attributes.position;
+                for (let i = 0; i < spPos.count; i++) {
+                    let sz = spPos.getZ(i);
+                    sz += Math.sin(waveClock * 3 + i) * 0.003;
+                    spPos.setZ(i, sz);
+                }
+                spPos.needsUpdate = true;
+            }
+
+            if (rainParticles && rainParticles.visible) {
+                const pos = rainParticles.geometry.attributes.position;
+                for (let i = 2; i < pos.count * 3; i += 3) {
+                    pos.array[i] -= 0.9;
+                    if (pos.array[i] < -2) {
+                        pos.array[i] = 15;
+                    }
+                }
+                pos.needsUpdate = true;
+            }
+
+            controls.update(); 
+            renderer.render(scene, camera);
+        }
+
+        function drawCurvedTimelineGraph() {
+            const canvas = document.getElementById('timelineGraph');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            ctx.clearRect(0, 0, w, h);
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, h * 0.25); ctx.lineTo(w, h * 0.25);
+            ctx.moveTo(0, h * 0.75); ctx.lineTo(w, h * 0.75);
+            ctx.stroke();
+
+            if (graphDataPoints.length < 2) return;
+
+            let currentPoint = graphDataPoints[graphDataPoints.length - 1];
+            let lineColor = '#4ade80';
+            let gradColorTop = 'rgba(74, 222, 128, 0.4)';
+            let gradColorBot = 'rgba(74, 222, 128, 0.02)';
+
+            if (currentPoint.state === 'extreme') {
+                lineColor = '#ef4444';
+                gradColorTop = 'rgba(239, 68, 68, 0.55)';
+                gradColorBot = 'rgba(239, 68, 68, 0.05)';
+            } else if (currentPoint.state === 'moderate') {
+                lineColor = '#facc15';
+                gradColorTop = 'rgba(250, 204, 21, 0.45)';
+                gradColorBot = 'rgba(250, 204, 21, 0.05)';
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(0, h);
+            for (let i = 0; i < graphDataPoints.length; i++) {
+                let x = (i / (100 - 1)) * w;
+                let y = h - (graphDataPoints[i].val * (h - 15) + 10);
+                if (i === 0) ctx.lineTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.lineTo(w, h);
+            ctx.closePath();
+
+            let grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, gradColorTop);
+            grad.addColorStop(1, gradColorBot);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+
+            for (let i = 0; i < graphDataPoints.length; i++) {
+                let x = (i / (100 - 1)) * w;
+                let y = h - (graphDataPoints[i].val * (h - 15) + 10);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            let lastX = w;
+            let currentCurveVal = Math.pow(cycleTimer / totalCycleTime, 2.2);
+            let lastY = h - (currentCurveVal * (h - 15) + 10);
+            
+            ctx.fillStyle = lineColor;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = lineColor;
+            ctx.beginPath();
+            ctx.arc(lastX - 2, lastY, 4.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
